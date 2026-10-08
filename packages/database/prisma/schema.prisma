@@ -1,0 +1,260 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum FileStatus {
+  PENDING
+  READY
+  QUARANTINED
+  DELETED
+}
+
+enum AssetKind {
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+}
+
+enum GenerationTaskStatus {
+  DRAFT
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELED
+}
+
+enum CreditTransactionType {
+  SUBSCRIPTION_GRANT
+  RECHARGE
+  GENERATION_HOLD
+  GENERATION_COMMIT
+  GENERATION_REFUND
+  ADMIN_ADJUSTMENT
+}
+
+enum SubscriptionTier {
+  FREE
+  BASIC
+  PRO
+  VIP
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELED
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String
+  displayName  String?
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  sessions      UserSession[]
+  files         FileObject[]
+  assets        Asset[]
+  tasks         GenerationTask[]
+  canvases      Canvas[]
+  creditAccount CreditAccount?
+  subscription  Subscription?
+}
+
+model Subscription {
+  id        String             @id @default(cuid())
+  userId    String             @unique
+  tier      SubscriptionTier   @default(FREE)
+  status    SubscriptionStatus @default(ACTIVE)
+  startsAt  DateTime           @default(now())
+  expiresAt DateTime?
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserSession {
+  id               String    @id @default(cuid())
+  userId           String
+  refreshTokenHash String    @unique
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model CreditAccount {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  balance   Int      @default(0)
+  held      Int      @default(0)
+  version   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions CreditTransaction[]
+}
+
+model CreditTransaction {
+  id           String                @id @default(cuid())
+  accountId    String
+  businessKey  String                @unique
+  type         CreditTransactionType
+  amount       Int
+  balanceAfter Int
+  metadata     Json?
+  createdAt    DateTime              @default(now())
+
+  account CreditAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([accountId, createdAt])
+}
+
+model FileObject {
+  id           String     @id @default(cuid())
+  ownerId      String
+  bucket       String
+  objectKey    String
+  originalName String
+  mimeType     String
+  sizeBytes    BigInt
+  sha256       String?
+  status       FileStatus @default(PENDING)
+  width        Int?
+  height       Int?
+  durationMs   Int?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  owner  User    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  assets Asset[]
+
+  @@unique([bucket, objectKey])
+  @@index([ownerId, createdAt])
+}
+
+model Asset {
+  id        String    @id @default(cuid())
+  ownerId   String
+  fileId    String
+  kind      AssetKind
+  name      String
+  source    String
+  metadata  Json?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  owner   User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  file    FileObject         @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  outputs GenerationOutput[]
+
+  @@index([ownerId, kind, createdAt])
+}
+
+model Canvas {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  content   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
+}
+
+model GenerationTask {
+  id               String               @id @default(cuid())
+  userId           String
+  idempotencyKey   String
+  capability       String
+  status           GenerationTaskStatus @default(DRAFT)
+  input            Json
+  modelPolicy      Json?
+  progress         Int                  @default(0)
+  estimatedCredits Int
+  errorCode        String?
+  errorMessage     String?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  user             User                  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  events           GenerationTaskEvent[]
+  outputs          GenerationOutput[]
+  providerRequests ProviderRequest[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, status, createdAt])
+  @@index([status, createdAt])
+}
+
+model GenerationTaskEvent {
+  id        String   @id @default(cuid())
+  taskId    String
+  type      String
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  task GenerationTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+}
+
+model GenerationOutput {
+  id        String   @id @default(cuid())
+  taskId    String
+  assetId   String
+  position  Int      @default(0)
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  task  GenerationTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  asset Asset          @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@unique([taskId, position])
+}
+
+model ProviderRequest {
+  id             String   @id @default(cuid())
+  taskId         String
+  provider       String
+  model          String
+  providerTaskId String?
+  requestId      String?
+  status         String
+  latencyMs      Int?
+  estimatedCost  Decimal? @db.Decimal(12, 6)
+  actualCost     Decimal? @db.Decimal(12, 6)
+  requestMeta    Json?
+  responseMeta   Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  task GenerationTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerTaskId])
+  @@index([taskId, createdAt])
+}

@@ -1,0 +1,25 @@
+{
+  "name": "ds-agent-tool",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.10.0",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @ds/web --filter @ds/api --filter @ds/worker dev",
+    "dev:api": "pnpm --filter @ds/api dev",
+    "build": "pnpm -r --if-present build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "lint": "pnpm -r --if-present lint",
+    "db:generate": "pnpm --filter @ds/database generate",
+    "db:migrate": "pnpm --filter @ds/database migrate",
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml down"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "typescript": "^5.7.0"
+  }
+}
